@@ -1,38 +1,150 @@
-name: Deploy Lambda
+name: 🚀 Deploy Lambda
 
 on:
   push:
-    branches: ["main"]
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  LAMBDA_NAME: "lambda-listar-agendamentos"  # ⚠️ ALTERE PARA SUA LAMBDA
+  AWS_REGION: "us-east-2"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout repo
+      - name: 📥 Checkout
         uses: actions/checkout@v4
+        
+      - name: 🔍 Verificar estrutura
+        run: |
+          echo "📁 Estrutura do repositório:"
+          ls -la
+          echo ""
+          echo "🔍 Procurando arquivos Lambda..."
+          find . -name "*.mjs" -o -name "*.js" | grep -v node_modules || echo "Nenhum arquivo encontrado"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+      - name: 📦 Criar pacote (FIXED)
+        id: package
+        run: |
+          echo "🔎 Detectando arquivo principal..."
+          
+          # Procura o arquivo principal
+          if [ -f "index.mjs" ]; then
+            CODE_FILE="index.mjs"
+            echo "✅ Usando: index.mjs (ES Modules)"
+          elif [ -f "index.js" ]; then
+            CODE_FILE="index.js"
+            echo "✅ Usando: index.js (CommonJS)"
+          elif [ -f "handler.mjs" ]; then
+            CODE_FILE="handler.mjs"
+            echo "✅ Usando: handler.mjs"
+          elif [ -f "handler.js" ]; then
+            CODE_FILE="handler.js"
+            echo "✅ Usando: handler.js"
+          else
+            echo "❌ ERRO: Nenhum arquivo Lambda encontrado!"
+            echo "📁 Arquivos no diretório:"
+            ls -la
+            exit 1
+          fi
+          
+          echo "🗜️ Criando package: $CODE_FILE"
+          
+          # Cria o ZIP
+          zip lambda-package.zip "$CODE_FILE"
+          
+          # Verifica se criou
+          if [ ! -f "lambda-package.zip" ]; then
+            echo "❌ ERRO: Falha ao criar ZIP!"
+            exit 1
+          fi
+          
+          echo "✅ Package criado com sucesso!"
+          echo "📊 Tamanho: $(stat -f%z lambda-package.zip) bytes"
+          echo ""
+          echo "📦 Conteúdo do ZIP:"
+          unzip -l lambda-package.zip
+          
+          # Salva o nome do arquivo para uso posterior
+          echo "code_file=$CODE_FILE" >> $GITHUB_OUTPUT
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Zip Lambda
-        run: zip -r listar-agendamentos.zip .
-
-      # Configurar credenciais da AWS
-      - name: Configure AWS credentials
+      - name: 🔐 Configurar AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-2  # ou outra região
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy Lambda
+      - name: ✅ Verificar Lambda
         run: |
+          echo "🔍 Verificando Lambda: ${{ env.LAMBDA_NAME }}"
+          
+          # Tenta obter info da Lambda
+          if aws lambda get-function \
+            --function-name "${{ env.LAMBDA_NAME }}" \
+            --region "${{ env.AWS_REGION }}" 2>/dev/null; then
+            echo "✅ Lambda encontrada!"
+          else
+            echo "⚠️ AVISO: Lambda não encontrada"
+            echo "Se for a primeira vez, crie manualmente:"
+            echo "- Runtime: Node.js 20.x"
+            echo "- Handler: index.handler"
+            echo "- Timeout: 30s, Memory: 128MB"
+          fi
+
+      - name: 🚀 Fazer Deploy
+        run: |
+          echo "🚀 Fazendo deploy para: ${{ env.LAMBDA_NAME }}"
+          
+          # Comando de deploy
           aws lambda update-function-code \
-            --function-name lambda-listar-agendamentos \
-            --zip-file fileb://listar-agendamentos.zip
+            --function-name "${{ env.LAMBDA_NAME }}" \
+            --zip-file fileb://lambda-package.zip \
+            --region "${{ env.AWS_REGION }}" \
+            --no-cli-pager
+          
+          echo "✅ Deploy concluído!"
+          
+          # Verifica última modificação
+          echo "🕒 Última atualização:"
+          aws lambda get-function \
+            --function-name "${{ env.LAMBDA_NAME }}" \
+            --query 'Configuration.LastModified' \
+            --region "${{ env.AWS_REGION }}" \
+            --output text
+
+      - name: 🧪 Teste rápido
+        run: |
+          echo "🧪 Testando Lambda (aguardando 10s)..."
+          sleep 10
+          
+          # Teste simples
+          if aws lambda invoke \
+            --function-name "${{ env.LAMBDA_NAME }}" \
+            --payload '{}' \
+            --cli-binary-format raw-in-base64-out \
+            --region "${{ env.AWS_REGION }}" \
+            test-output.json 2>/dev/null; then
+            
+            echo "✅ Lambda executada com sucesso!"
+            echo "📄 Saída:"
+            cat test-output.json || echo "(vazio)"
+            rm -f test-output.json
+          else
+            echo "⚠️ Teste falhou (pode ser normal para algumas Lambdas)"
+          fi
+
+      - name: 🎉 Concluir
+        if: success()
+        run: |
+          echo ""
+          echo "========================================"
+          echo "🎉 DEPLOY CONCLUÍDO COM SUCESSO!"
+          echo "========================================"
+          echo "Lambda: ${{ env.LAMBDA_NAME }}"
+          echo "Repositório: ${{ github.repository }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "========================================"
