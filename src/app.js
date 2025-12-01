@@ -1,31 +1,28 @@
+// Nome do arquivo: index.mjs
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
+
+const client = new DynamoDBClient({});
+const dynamodb = DynamoDBDocumentClient.from(client);
+
 export const handler = async (event) => {
+    console.log('Consultando TODOS os itens...');
+    
     try {
-        // Parâmetros de paginação da query string
-        const limit = event.queryStringParameters?.limit || 50;
-        const lastKey = event.queryStringParameters?.lastKey;
-        
-        const params = {
-            TableName: 'agendamentos-esmalteria',
-            Limit: parseInt(limit)
-        };
-        
-        // Continua de onde parou (para paginação)
-        if (lastKey) {
-            params.ExclusiveStartKey = JSON.parse(lastKey);
-        }
-        
+        const params = { TableName: 'agendamentos-esmalteria' };
         const result = await dynamodb.send(new ScanCommand(params));
+        
+        const itensOrdenados = result.Items.sort((a, b) => 
+            new Date(b.timestamp || 0) - new Date(a.timestamp || 0)
+        );
         
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
             body: JSON.stringify({
                 success: true,
-                data: result.Items,
-                total: result.Count,
-                scanned: result.ScannedCount,
-                hasMore: !!result.LastEvaluatedKey,
-                lastKey: result.LastEvaluatedKey
+                total: itensOrdenados.length,
+                data: itensOrdenados
             })
         };
         
@@ -33,7 +30,7 @@ export const handler = async (event) => {
         console.error('Erro:', error);
         return {
             statusCode: 500,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
             body: JSON.stringify({ success: false, error: error.message })
         };
     }
