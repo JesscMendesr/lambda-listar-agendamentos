@@ -6,7 +6,6 @@ const client = new DynamoDBClient({});
 const dynamodb = DynamoDBDocumentClient.from(client);
 
 export const handler = async (event) => {
-    console.log('Consultando TODOS os itens...');
     
     try {
         const params = { TableName: 'agendamentos-esmalteria' };
